@@ -1,0 +1,11 @@
+{
+    "nPart" : 250,
+    "gamma": 100.41,
+    "direction": [0,0,1],
+    "position": [0,0,0],
+    "sigmaPosition": [260,260,50.25],
+    "sigmaMomentum": [1e-8,1e-8,100.41e-4],
+    "transverseTruncation": 1040,
+    "longitudinalTruncation": 90,
+    "plot" : 1
+}
