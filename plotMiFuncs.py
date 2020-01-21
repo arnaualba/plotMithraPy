@@ -321,15 +321,18 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d',
     pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
     pUnits = [' ', 'm', 'm', 's', ' ', ' ', ' ' ]
 
-    d_to_plot = df[ df['screenNum'] == screenNum ]
-    screenPos = d_to_plot.iloc[0]['screenPos']
+    if 'screenNum' in df.columns:
+        d_to_plot = df[ df['screenNum'] == screenNum ]
+        screenPos = d_to_plot.iloc[0]['screenPos']
+    else:
+        d_to_plot = df
+        screenPos = screenNum
+
     clight = 3e8
     
     # Get energy
-    if 'E' in quants:
+    if ('E' in quants) and not 'E' in df.columns:
         mc2 = .511 * 1e6  # eV/c2 electron mass
-        pNames = pNames + ['E']
-        pUnits = pUnits + ['eV']
         px = np.array(d_to_plot['px'])
         py = np.array(d_to_plot['py'])
         pz = np.array(d_to_plot['pz'])
@@ -338,6 +341,8 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d',
             g_i = np.sqrt( 1 + np.inner(bg,bg) )  # Get gamma of particle
             E.append( mc2 * g_i )
         d_to_plot = d_to_plot.assign( E = E )
+    pNames = pNames + ['E']
+    pUnits = pUnits + ['eV']
 
     # Get quantities to plot
     quants = ['t', 't'] + quants  # Plot t if an empty list was given
@@ -369,7 +374,8 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d',
         bin_size = bin_edges[1] - bin_edges[0]
         digitized = np.digitize( x, bin_edges )  # Get data organised in bins
         bin_means = [y[digitized == i].mean() for i in range(1, len(bin_edges))]
-        bin_means -= bin_means[0]
+#        bin_means -= bin_means[0]
+        bin_means -= np.array(bin_means).mean()
         labs[1] = '$\Delta$' + labs[1]
         ax.plot( bin_edges[1:] - .5*bin_size, bin_means, zorder = 2, lw = 2)
 
