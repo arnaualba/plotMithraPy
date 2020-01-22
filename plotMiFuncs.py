@@ -109,8 +109,10 @@ def importProfile( fname, show = False ):
         if not tis in time_stamps:
             time_stamps.append( tis )
     time_stamps.sort()
+    nump += 1
     if show:
         print( 'time steps = ', time_stamps )
+        print( 'num processors = ', nump )
         
     # Get the data
     posp = fname.find('#')
@@ -127,6 +129,7 @@ def importProfile( fname, show = False ):
             data.append( df  )
 
     return [pd.concat(data), time_stamps]
+
 
 def plotProfile( ax, df, quants, gamma_ = 1, timeStep = 0, factors = [1,1], type = 'hist2d', frame = 'comoving', show_und = False, rb = 0, dt = 1, Lu = 1, nbins = 100, fs = 14, ls = '-', lw = 2, color = 0 ):
     '''
@@ -270,9 +273,10 @@ def importScreen( fname, index_screens = [], show = False ):
             nump = nup
         if nus > nums:
             nums = nus
+    nump += 1
     nums += 1
     if show:
-        print( 'Number of screens = ', str(nums), ', number of processors = ', str(nump + 1) )
+        print( 'Number of screens = ', str(nums), ', number of processors = ', str(nump) )
         
     # Get the data
     posp = fname.find('#')
@@ -300,8 +304,9 @@ def importScreen( fname, index_screens = [], show = False ):
     screenPos.sort()
     if show:
         print('Screens at ', screenPos)
-        
+
     return [pd.concat(data), screenPos]
+
 
 
 def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0 ):
