@@ -15,7 +15,8 @@ units = {
     'm' : 1e3,
     '$\mu$' : 1e6,
     'n' : 1e9,
-    'p' : 1e12
+    'p' : 1e12,
+    'f' : 1e15
 }
 
 colors = [ 'k', 'b', 'r', 'g', 'y', 'm', 'c' ]
@@ -229,7 +230,7 @@ def plotProfile( ax, df, quants, gamma_ = 1, timeStep = 0, factors = [1,1], type
         bin_means = [y[digitized == i].mean() for i in range(1, len(bin_edges))]
         bin_means -= bin_means[0]
         labs[1] = '$\Delta$' + labs[1]
-        ax.plot( bin_edges[1:] - .5*bin_size, bin_means, zorder = 2, lw = 2)
+        ax.plot( bin_edges[1:] - .5*bin_size, bin_means, zorder = 2, lw = lw, ls = ls)
 
     if show_und and quants[-2] == 'z':
         if frame == 'comoving':
@@ -382,7 +383,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d',
 #        bin_means -= bin_means[0]
         bin_means -= np.array(bin_means).mean()
         labs[1] = '$\Delta$' + labs[1]
-        ax.plot( bin_edges[1:] - .5*bin_size, bin_means, zorder = 2, lw = 2)
+        ax.plot( bin_edges[1:] - .5*bin_size, bin_means, zorder = 2, lw = lw, ls = ls)
 
     ax.tick_params( axis = 'both', labelsize = fs )
     ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-1, 3) )
