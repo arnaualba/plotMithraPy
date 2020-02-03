@@ -15,9 +15,12 @@ def gauss( x, mu = 0.0, sig = 1.0 ):
     return np.exp( - ( x - mu )**2 / ( 2 * sig**2 ) )
 
 def xyGauss( sig = 1.0 ):
-    r = sig * np.random.randn()  # Gaussian distro for radius
-    phi = 2 * np.pi * np.random.rand()  # Uniform distro for radius
-    return [ r * np.cos(phi) , r * np.sin(phi) ]
+    accept = 0
+    while not accept:
+        x = 4 * sig * np.random.uniform(-1.0,1.0)
+        y = 4 * sig * np.random.uniform(-1.0,1.0)
+        accept = np.random.uniform() < gauss(np.sqrt(x**2 + y**2), sig = sig)
+    return [x,y]
 
 def generate_gaussian ( nPart = 1000, gamma = 100, direction = [0.,0.,1.], position = [0.,0.,0.],
                         sigmaPosition = [1.,1.,1.], sigmaMomentum = [1.,1.,1.],
@@ -48,12 +51,11 @@ def generate_gaussian ( nPart = 1000, gamma = 100, direction = [0.,0.,1.], posit
     '''
     assert abs(np.linalg.norm(direction) - 1) < 1e-5, print('Direction needs to have a norm = 1')
     nPart = int(nPart)
-#     assert nPart % 4 = 0, print('The number of particles must be a multiple of 4')
 
     x0 = position[0]
     y0 = position[1]
     z0 = position[2]
-    bg = gamma * np.sqrt(1 - 1 / gamma**2 )
+    bg = np.sqrt(gamma**2 - 1)
     px0 = direction[0] * bg
     py0 = direction[1] * bg
     pz0 = direction[2] * bg
