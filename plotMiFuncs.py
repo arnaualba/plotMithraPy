@@ -250,7 +250,7 @@ def plotProfile( ax, df, quants, gamma_ = 1, timeStep = 0, factors = [1,1], type
     return [x,y]
 
 
-def importScreen( fname, index_screens = [], show = False ):
+def importScreen( fname, index_screens = [], show = False, pNames = [] ):
     ''' 
     Returns bunch profile on all screens as a dataframe
     -fname : (String) Filename to read data from. Put # instead of numbers. eg tests/test2/bunch-screen/bunch-p#-screen#.txt
@@ -258,7 +258,8 @@ def importScreen( fname, index_screens = [], show = False ):
     -show  : (Boolean) Print info
     '''
     dirname = fname[:fname.rfind('/')]
-    pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
+    if len(pNames) == 0:
+        pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
     if show:
         print( 'columns = ', pNames )
 
@@ -295,7 +296,10 @@ def importScreen( fname, index_screens = [], show = False ):
             with open(pname) as f:
                 first_line = f.readline()
                 ind = first_line.find('=')
-                spos = float( first_line[ ind + 1:] )
+                if ind != -1:
+                    spos = float( first_line[ ind + 1:] )
+                else:
+                    spos = s
             if not spos in screenPos:
                 screenPos.append(spos)
             df = pd.read_csv(pname, sep='\t', skiprows = 1, header = None, names = pNames)
@@ -323,6 +327,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d',
     -- 'hist' for histogram of x axis
     -- 'scatter' for scatter plot
     -- 'mod' to get plot of modulation of y axis as line plot
+    -nbins : (int) Number of bins to use for the histograms and the modulation plot
     '''
     pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
     pUnits = [' ', 'm', 'm', 's', ' ', ' ', ' ' ]
@@ -371,7 +376,11 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d',
         l = len(x)
         ax.scatter( x[::nbins], y[::nbins], marker = '.', color = 'C' + str(color), zorder = 2)
     elif type == 'hist2d':
-        ax.hist2d( x, y, bins = nbins, cmin = 1 , cmap=plt.cm.jet, zorder = 2 )
+        hi = ax.hist2d( x, y, bins = nbins, cmin = 1 , cmap=plt.cm.jet, zorder = 2)
+        binx = hi[1][2] - hi[1][1]
+        biny = hi[2][2] - hi[2][1]
+        cbar = plt.colorbar(hi[3], ax = ax)
+        cbar.set_label('Number of macro particles', fontsize = fs)
     elif type == 'hist':
         ax.hist( x, bins = nbins, color = 'C' + str(color), zorder = 2 )
         labs[1] = 'Density [arb]'
@@ -389,7 +398,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d',
     ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-1, 3) )
     ax.set_xlabel( labs[0], fontsize = fs )
     ax.set_ylabel( labs[1], fontsize = fs )
-    ax.text( 1.2, .4, 'screen position = ' + str(screenPos) + ' m', transform=ax.transAxes, fontsize = fs, ha='center' )
+#     ax.text( 1.2, .4, str(screenPos) + ' m', transform=ax.transAxes, fontsize = fs, ha='center' )
 
     return [x,y]
 
