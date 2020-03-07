@@ -279,6 +279,10 @@ def importScreen( fname, index_screens = [], show = False, pNames = [] ):
     nums += 1
     if show:
         print( 'Number of screens = ', str(nums), ', number of processors = ', str(nump) )
+    
+    for i,ind in enumerate(index_screens):
+        if ind < 0:
+            index_screens[i] = nums + ind
         
     # Get the data
     posp = fname.find('#')
@@ -331,6 +335,9 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d',
     '''
     pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
     pUnits = [' ', 'm', 'm', 's', ' ', ' ', ' ' ]
+
+    if screenNum < 0:
+        screenNum = np.max(df['screenNum']) + 1 + screenNum
 
     if 'screenNum' in df.columns:
         d_to_plot = df[ df['screenNum'] == screenNum ]
