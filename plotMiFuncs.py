@@ -318,7 +318,8 @@ def importScreen( fname, index_screens = [], show = False, pNames = [] ):
 
 
 
-def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0 ):
+def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy = [],
+                type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0 ):
     '''
     Plots the data given. 
     -ax : (matplotlib axis)
@@ -326,11 +327,14 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d',
     -quants : (list of strings) Have to be a column name or 'E'
     -screenNum : (int) Number of the screen to plot
     -factors : (list of floats)
+    -limx : (2 element list) xlimits
+    -limy : (2 element list) ylimits
     -type : (string) 
     -- 'hist2d' for colormap
     -- 'hist' for histogram of x axis
     -- 'scatter' for scatter plot
     -- 'mod' to get plot of modulation of y axis as line plot
+    -- 'hist2d-hist' for both
     -nbins : (int) Number of bins to use for the histograms and the modulation plot
     '''
     pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
@@ -375,19 +379,42 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], type = 'hist2d',
     factors = np.abs(factors)
     # Get axis labels
     rev_units = dict(map(reversed, units.items()))
-    labs = [ quants[-2] + ' [' + rev_units[factors[-2] ] + pUnits[pNames.index(quants[-2])] + ']',
-             quants[-1] + ' [' + rev_units[factors[-1] ] + pUnits[pNames.index(quants[-1])] + ']' ]
+    if factors[-2] in rev_units:
+        unitx = rev_units[factors[-2]]
+    else:
+        unitx = str(factors[-2]) + '*'
+    if factors[-1] in rev_units:
+        unity = rev_units[factors[-1]]
+    else:
+        unity = str(factors[-1]) + '*'
+    labs = [ quants[-2] + ' [' + unitx + pUnits[pNames.index(quants[-2])] + ']',
+             quants[-1] + ' [' + unity + pUnits[pNames.index(quants[-1])] + ']' ]
+    # Remove particles out of limits
+    if len(limx) == 2:
+        rm_index = np.append(np.where(x < limx[0]), np.where(x > limx[1]))
+        nbins = int(nbins * (1 - rm_index.size / x.size))
+        x = np.delete(x, rm_index)
+        y = np.delete(y, rm_index)
+    if len(limy) == 2:
+        rm_index = np.append(np.where(y < limy[0]), np.where(y > limy[1]))
+        nbins = int(nbins * (1 - rm_index.size / x.size))
+        x = np.delete(x, rm_index)
+        y = np.delete(y, rm_index)
 
     # Plot stuff
     if type == 'scatter':
-        l = len(x)
         ax.scatter( x[::nbins], y[::nbins], marker = '.', color = 'C' + str(color), zorder = 2)
-    elif type == 'hist2d':
+    elif 'hist2d' in type:
         hi = ax.hist2d( x, y, bins = nbins, cmin = 1 , cmap=plt.cm.jet, zorder = 2)
-        binx = hi[1][2] - hi[1][1]
-        biny = hi[2][2] - hi[2][1]
         cbar = plt.colorbar(hi[3], ax = ax)
         cbar.set_label('Number of macro particles', fontsize = fs)
+        if type == 'hist2d-hist':
+            ax2 = ax.twinx()
+            hist, xPoints = np.histogram(x, bins = nbins, density = True)
+            xPoints += .5 * (xPoints[1] - xPoints[0])
+            ax2.bar(xPoints[:-1], hist / np.max(hist) * .3, width = xPoints[1] - xPoints[0], color = 'C' + str(color))
+            ax2.set_ylim(0, 1)
+#            ax2.tick_params(axis='y', right = False, labelright = False)
     elif type == 'hist':
         ax.hist( x, bins = nbins, color = 'C' + str(color), zorder = 2 )
         labs[1] = 'Density [arb]'
@@ -494,3 +521,4 @@ def adjust_axes_limits( axs, axis = 'x' ):
     r = np.max(crange)
     for i, ax in enumerate(axs):
         change_limits( ax, r - crange[i], axis = axis  )
+        
