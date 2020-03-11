@@ -414,7 +414,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy 
             xPoints += .5 * (xPoints[1] - xPoints[0])
             ax2.bar(xPoints[:-1], hist / np.max(hist) * .3, width = xPoints[1] - xPoints[0], color = 'C' + str(color))
             ax2.set_ylim(0, 1)
-#            ax2.tick_params(axis='y', right = False, labelright = False)
+            ax2.tick_params(axis='y', right = False, labelright = False)
     elif type == 'hist':
         ax.hist( x, bins = nbins, color = 'C' + str(color), zorder = 2 )
         labs[1] = 'Density [arb]'
