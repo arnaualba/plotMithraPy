@@ -280,7 +280,7 @@ def importScreen( fname, index_screens = [], show = False, pNames = [] ):
     if show:
         print( 'Number of screens = ', str(nums), ', number of processors = ', str(nump) )
     
-    for i,ind in enumerate(index_screens):
+    for i,ind in enumerate(index_screens):  # Such that -1 indexing works
         if ind < 0:
             index_screens[i] = nums + ind
         
@@ -316,6 +316,97 @@ def importScreen( fname, index_screens = [], show = False, pNames = [] ):
 
     return [pd.concat(data), screenPos]
 
+
+def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant = 't', yquant = 'E', index_screen = 0, reduce_factor = 1 ):
+    ''' 
+    Returns x and y of the bunch screen data
+    -fname : (String) Filename to read data from. Put # instead of numbers. eg tests/test2/bunch-screen/bunch-p#-screen#.txt
+    -index_screens : (list of ints) Indices of screens to import. By default it will import all screens.
+    -xquant : (string) Quantity you want (from pNames list or E for energy)
+    -yquant : (string) Quantity you want
+    -index_screen : (unsigned int) index of screen ot get data from
+    -reduce_factor : (double) proportion of random values to ignore in order to reduce computational memory
+    -show  : (Boolean) Print info
+    '''
+    dirname = fname[:fname.rfind('/')]
+    if len(pNames) == 0:
+        pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
+    if show:
+        print( 'columns = ', pNames )
+
+    # Get number of processors and screens
+    nums = 0
+    nump = 0
+    for name in os.listdir( dirname ):
+        ind1 = name.find('-')
+        ind2 = name.rfind('-')
+        nup = int(name[ ind1 + len('-p') : ind2 ])
+        nus = int(name[ ind2 + len('-screen') : -len('.txt') ])
+        if nup > nump:
+            nump = nup
+        if nus > nums:
+            nums = nus
+    nump += 1
+    nums += 1
+    if show:
+        print( 'Number of screens = ', str(nums), ', number of processors = ', str(nump) )
+    
+    for i,ind in enumerate(index_screens): # such that -1 indexing works
+        if ind < 0:
+            index_screens[i] = nums + ind
+    x = np.empty(0)
+    y = np.empty(0)
+    # Get the data
+    posp = fname.find('#')
+    poss = fname.rfind('#')
+    data = []
+    screenPos = []
+    for s in range(nums):
+        if (not s in index_screens) and len(index_screens) > 0:
+            continue
+        if s != index_screen:
+            continue
+        sname = fname[:poss] + str( s ) + fname[poss+1:]
+        if show:
+            print(s, sname)
+        for p in range(nump):
+            pname = sname[:posp] + str(p) + sname[posp+1:]
+            with open(pname) as f:
+                first_line = f.readline()
+                ind = first_line.find('=')
+                if ind != -1:
+                    spos = float( first_line[ ind + 1:] )
+                else:
+                    spos = s
+            if not spos in screenPos:
+                screenPos.append(spos)
+            if show:
+                print('Reading', pname)
+            df = pd.read_csv(pname, sep='\t', skiprows = 1, header = None, names = pNames)
+            if reduce_factor > 1:
+                d = []
+                for i in range(df.shape[0]):
+                    if np.random.rand() > 1 / reduce_factor:
+                        d.append(i)
+                df = df.drop(d)
+            x = np.append(x,np.array(df[xquant]))
+            if yquant == 'E':
+                mc2 = .511 * 1e6  # eV/c2 electron mass
+                px = np.array(df['px'])
+                py = np.array(df['py'])
+                pz = np.array(df['pz'])
+                E = []
+                for i, bg in enumerate( zip( px, py, pz) ):
+                    g_i = np.sqrt( 1 + np.inner(bg,bg) )  # Get gamma of particle
+                    E.append( mc2 * g_i )
+                y = np.append(y,np.array(E))
+            else:
+                y = np.append(y,np.array(df[yquant]))
+    screenPos.sort()
+    if show:
+        print('Screens at ', screenPos)
+
+    return [x,y]
 
 
 def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy = [],
@@ -435,6 +526,99 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy 
 #     ax.text( 1.2, .4, str(screenPos) + ' m', transform=ax.transAxes, fontsize = fs, ha='center' )
 
     return [x,y]
+
+
+def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
+                  type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0):
+    '''
+    Plots the data given. 
+    -ax : (matplotlib axis)
+    -x,y : quantities to plot
+    -quants : (list of strings) Have to be a column name or 'E'
+    -screenNum : (int) Number of the screen to plot
+    -factors : (list of floats)
+    -limx : (2 element list) xlimits
+    -limy : (2 element list) ylimits
+    -type : (string) 
+    -- 'hist2d' for colormap
+    -- 'hist' for histogram of x axis
+    -- 'scatter' for scatter plot
+    -- 'mod' to get plot of modulation of y axis as line plot
+    -- 'hist2d-hist' for both
+    -nbins : (int) Number of bins to use for the histograms and the modulation plot
+    '''
+    pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
+    pUnits = [' ', 'm', 'm', 's', ' ', ' ', ' ' ]
+
+    clight = 3e8
+    pNames = pNames + ['E']
+    pUnits = pUnits + ['eV']
+
+    # Get quantities to plot
+    if len(quants) != 2:
+        print('error, 2 quantities need to be given in quants = []')
+    if quants[-2] == 't':
+        x -= x.mean()
+    # Get units
+    factors = [1, 1] + factors
+    x *= factors[-2]
+    y *= factors[-1]
+    factors = np.abs(factors)
+    # Get axis labels
+    rev_units = dict(map(reversed, units.items()))
+    if factors[-2] in rev_units:
+        unitx = rev_units[factors[-2]]
+    else:
+        unitx = str(factors[-2]) + '*'
+    if factors[-1] in rev_units:
+        unity = rev_units[factors[-1]]
+    else:
+        unity = str(factors[-1]) + '*'
+    labs = [ quants[-2] + ' [' + unitx + pUnits[pNames.index(quants[-2])] + ']',
+             quants[-1] + ' [' + unity + pUnits[pNames.index(quants[-1])] + ']' ]
+    # Remove particles out of limits
+    if len(limx) == 2:
+        rm_index = np.append(np.where(x < limx[0]), np.where(x > limx[1]))
+        nbins = int(nbins * (1 - rm_index.size / x.size))
+        x = np.delete(x, rm_index)
+        y = np.delete(y, rm_index)
+    if len(limy) == 2:
+        rm_index = np.append(np.where(y < limy[0]), np.where(y > limy[1]))
+        nbins = int(nbins * (1 - rm_index.size / x.size))
+        x = np.delete(x, rm_index)
+        y = np.delete(y, rm_index)
+
+    # Plot stuff
+    if type == 'scatter':
+        ax.scatter( x[::nbins], y[::nbins], marker = '.', color = 'C' + str(color), zorder = 2)
+    elif 'hist2d' in type:
+        hi = ax.hist2d( x, y, bins = nbins, cmin = 1 , cmap=plt.cm.jet, zorder = 2)
+        cbar = plt.colorbar(hi[3], ax = ax)
+        cbar.set_label('Number of macro particles', fontsize = fs)
+        if type == 'hist2d-hist':
+            ax2 = ax.twinx()
+            hist, xPoints = np.histogram(x, bins = nbins, density = True)
+            xPoints += .5 * (xPoints[1] - xPoints[0])
+            ax2.bar(xPoints[:-1], hist / np.max(hist) * .3, width = xPoints[1] - xPoints[0], color = 'C' + str(color))
+            ax2.set_ylim(0, 1)
+            ax2.tick_params(axis='y', right = False, labelright = False)
+    elif type == 'hist':
+        ax.hist( x, bins = nbins, color = 'C' + str(color), zorder = 2 )
+        labs[1] = 'Density [arb]'
+    elif type == 'mod':
+        bin_edges = np.linspace( np.min(x), np.max(x), nbins )
+        bin_size = bin_edges[1] - bin_edges[0]
+        digitized = np.digitize( x, bin_edges )  # Get data organised in bins
+        bin_means = [y[digitized == i].mean() for i in range(1, len(bin_edges))]
+#        bin_means -= bin_means[0]
+        bin_means -= np.array(bin_means).mean()
+        labs[1] = '$\Delta$' + labs[1]
+        ax.plot( bin_edges[1:] - .5*bin_size, bin_means, zorder = 2, lw = lw, ls = ls)
+
+    ax.tick_params( axis = 'both', labelsize = fs )
+    ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-1, 3) )
+    ax.set_xlabel( labs[0], fontsize = fs )
+    ax.set_ylabel( labs[1], fontsize = fs )
 
 
 def getFromSlurm( rowVar, line, show = False ):
