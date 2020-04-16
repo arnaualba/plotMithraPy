@@ -324,7 +324,7 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
     -index_screens : (list of ints) Indices of screens to import. By default it will import all screens.
     -xquant : (string) Quantity you want (from pNames list or E for energy)
     -yquant : (string) Quantity you want
-    -index_screen : (unsigned int) index of screen ot get data from
+    -index_screen : (unsigned int) index of screen to get data from
     -reduce_factor : (double) proportion of random values to ignore in order to reduce computational memory
     -show  : (Boolean) Print info
     '''
@@ -354,6 +354,8 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
     for i,ind in enumerate(index_screens): # such that -1 indexing works
         if ind < 0:
             index_screens[i] = nums + ind
+    if index_screen < 0:
+        index_screen += nums
     x = np.empty(0)
     y = np.empty(0)
     # Get the data
@@ -400,6 +402,8 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
                     g_i = np.sqrt( 1 + np.inner(bg,bg) )  # Get gamma of particle
                     E.append( mc2 * g_i )
                 y = np.append(y,np.array(E))
+            elif yquant == 'none':
+                y = np.empty(0)
             else:
                 y = np.append(y,np.array(df[yquant]))
     screenPos.sort()
@@ -410,7 +414,7 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
 
 
 def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy = [],
-                type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0 ):
+                type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0, maxHH = .3 ):
     '''
     Plots the data given. 
     -ax : (matplotlib axis)
@@ -420,6 +424,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy 
     -factors : (list of floats)
     -limx : (2 element list) xlimits
     -limy : (2 element list) ylimits
+    -maxHH : (float [0,1]) max height of histogram in hist2d-hist
     -type : (string) 
     -- 'hist2d' for colormap
     -- 'hist' for histogram of x axis
@@ -503,7 +508,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy 
             ax2 = ax.twinx()
             hist, xPoints = np.histogram(x, bins = nbins, density = True)
             xPoints += .5 * (xPoints[1] - xPoints[0])
-            ax2.bar(xPoints[:-1], hist / np.max(hist) * .3, width = xPoints[1] - xPoints[0], color = 'C' + str(color))
+            ax2.bar(xPoints[:-1], hist / np.max(hist) * maxHH, width = xPoints[1] - xPoints[0], color = 'C' + str(color))
             ax2.set_ylim(0, 1)
             ax2.tick_params(axis='y', right = False, labelright = False)
     elif type == 'hist':
@@ -529,7 +534,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy 
 
 
 def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
-                  type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0):
+                  type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0, maxHH = .3):
     '''
     Plots the data given. 
     -ax : (matplotlib axis)
@@ -539,6 +544,7 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
     -factors : (list of floats)
     -limx : (2 element list) xlimits
     -limy : (2 element list) ylimits
+    -maxHH : (float [0,1]) max height of histogram in hist2d-hist
     -type : (string) 
     -- 'hist2d' for colormap
     -- 'hist' for histogram of x axis
@@ -594,12 +600,12 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
     elif 'hist2d' in type:
         hi = ax.hist2d( x, y, bins = nbins, cmin = 1 , cmap=plt.cm.jet, zorder = 2)
         cbar = plt.colorbar(hi[3], ax = ax)
-        cbar.set_label('Number of macro particles', fontsize = fs)
+        cbar.set_label('Number of macro particles', fontsize = 10)
         if type == 'hist2d-hist':
             ax2 = ax.twinx()
             hist, xPoints = np.histogram(x, bins = nbins, density = True)
             xPoints += .5 * (xPoints[1] - xPoints[0])
-            ax2.bar(xPoints[:-1], hist / np.max(hist) * .3, width = xPoints[1] - xPoints[0], color = 'C' + str(color))
+            ax2.bar(xPoints[:-1], hist / np.max(hist) * maxHH, width = xPoints[1] - xPoints[0], color = 'C' + str(color))
             ax2.set_ylim(0, 1)
             ax2.tick_params(axis='y', right = False, labelright = False)
     elif type == 'hist':
@@ -705,4 +711,21 @@ def adjust_axes_limits( axs, axis = 'x' ):
     r = np.max(crange)
     for i, ax in enumerate(axs):
         change_limits( ax, r - crange[i], axis = axis  )
-        
+
+# def getPotEnergy(x, y, z, px, py, pz):
+#     N = len(x)
+#     for i in range(N):
+#         for j in range(i+1,N):
+            
+# def getKinEnergy(px, py, pz):
+#     mc2 = .511 * 1e6  # eV/c2 electron mass
+#     E = 0
+#     for i, bg in enumerate( zip( px, py, pz) ):
+#         g_i = np.sqrt( 1 + np.inner(bg,bg) )  # Get gamma of particle
+#         E += mc2 * g_i 
+#     return E
+
+# def getEnergy(x, y, z, px, py, pz):
+#     U = getPotEnergy(x,y,z,px,py,pz)
+#     T = getKinEnergy(px,py,pz)
+#     return [T,U]
