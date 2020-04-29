@@ -20,10 +20,10 @@ units = {
 }
 
 colors = [ 'k', 'b', 'r', 'g', 'y', 'm', 'c' ]
+fs = 14  # Default fontsize
 
-
-sampNames = ['t', 'x', 'y','z_comoving', 'px', 'py','pz',
-             'sig_x', 'sig_y', 'sig_z', 'sig_px', 'sig_py', 'sig_pz', 'z_lab', 'bf']
+sampNames = ['t', 'x', 'y','z', 'px', 'py','pz',
+             'sig_x', 'sig_y', 'sig_z', 'sig_px', 'sig_py', 'sig_pz']
 sampUnits = ['s', 'm', 'm', 'm', ' ', ' ', ' ',
              'm', 'm', 'm', ' ', ' ', ' ', 'm', ' ']
 
@@ -50,10 +50,9 @@ def importStat( fname, show = False ):
     df = df.dropna(axis = 'columns')
     if show:
         print( fname )
-        print(str(len(sampNames)) + ' given names: ', sampNames, '\n' , str(len(df.columns)), ' columns' )
     return df
 
-def plotStat( ax, df, quants, factors = [1,1], fs = 14, ls = '-', lw = 2, color = 0 ):
+def plotStat( ax, df, quants, factors = [1,1], fs = fs, **kwargs):
     ''' 
     Plots given quantities on axis ax
     -ax : (matplotlib axis)
@@ -77,7 +76,7 @@ def plotStat( ax, df, quants, factors = [1,1], fs = 14, ls = '-', lw = 2, color 
              quants[-1] + ' [' + rev_units[factors[-1] ] + sampUnits[sampNames.index(quants[-1])] + ']' ]    
 
     # Plot
-    ax.plot( x, y, ls = ls, color = 'C' + str(color), lw = lw )
+    ax.plot( x, y, **kwargs)
     ax.tick_params( axis = 'both', labelsize = fs )
     ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-1, 3) )
     ax.set_xlabel( labs[0], fontsize = fs )
@@ -259,7 +258,8 @@ def importScreen( fname, index_screens = [], show = False, pNames = [] ):
     '''
     dirname = fname[:fname.rfind('/')]
     if len(pNames) == 0:
-        pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
+        # pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
+        pNames = ['x', 'y', 't', 'px', 'py', 'pz']
     if show:
         print( 'columns = ', pNames )
 
@@ -330,7 +330,8 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
     '''
     dirname = fname[:fname.rfind('/')]
     if len(pNames) == 0:
-        pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
+        # pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
+        pNames = ['x', 'y', 't', 'px', 'py', 'pz']
     if show:
         print( 'columns = ', pNames )
 
@@ -712,6 +713,7 @@ def adjust_axes_limits( axs, axis = 'x' ):
     for i, ax in enumerate(axs):
         change_limits( ax, r - crange[i], axis = axis  )
 
+# WORK IN PROGRESS
 # def getPotEnergy(x, y, z, px, py, pz):
 #     N = len(x)
 #     for i in range(N):
@@ -729,3 +731,58 @@ def adjust_axes_limits( axs, axis = 'x' ):
 #     U = getPotEnergy(x,y,z,px,py,pz)
 #     T = getKinEnergy(px,py,pz)
 #     return [T,U]
+
+def sliceError(file1, fileT, plot = False):
+    '''
+    Gives slice ernergy and energy spread errors between two files containing the slice energy
+    '''
+    df = pd.read_csv(file1, skiprows = 2, sep = ' ', header = None,
+                     index_col = False, names = ['avgE', 'stdE'])
+    dfT = pd.read_csv(fileT, skiprows = 2, sep = ' ', header = None,
+                      index_col = False, names = ['avgE', 'stdE'])
+
+    # Get rid of nans
+    nanInds = []
+    for i, row in df.iterrows():
+        if pd.isna(row['avgE']):
+            nanInds.append(i)
+            print('nan row ', i, ' in file ', file1)
+    for i, row in dfT.iterrows():
+        if pd.isna(row['avgE']) and not (i in nanInds) :
+            nanInds.append(i)
+            print('nan row ', i, ' in file ', fileT)
+    df = df.drop(nanInds)
+    dfT = dfT.drop(nanInds)
+
+    # Compute the errors
+    errE = np.average(np.abs(df['avgE'] - dfT['avgE']))
+    errEbar = np.std(np.abs(df['avgE'] - dfT['avgE']))
+    errSpread = np.average(np.abs(df['stdE'] - dfT['stdE']))
+    errSpreadbar = np.std(np.abs(df['stdE'] - dfT['stdE']))
+    
+    if plot:
+        fig, ax = plt.subplots()
+        x = np.arange(len(df['avgE']))
+        ax.errorbar(x, df['avgE'], yerr = df['stdE'])
+        ax.errorbar(x, dfT['avgE'], yerr = dfT['stdE'])
+        ax.legend(['case', 'truth'])
+        plt.show()
+        
+    return [errE, errSpread, errEbar, errSpreadbar]
+
+def log_errorbary(ax, x, y, yerr, **kwargs):
+    '''
+    Plot errorbars but for log scale, where errors need to be transfromed:
+    You are plotting x vs y, and in a cartesian coordinates plot you would use +-dy for error bars.
+    But d(log(y)) != log(dy), which is what you usually get when plotting an errorbar in log scale.
+    The correct way would be:
+    d(log(y)) = 1 / ln(10) * dy / y
+    '''
+    dy = np.array(yerr)
+    dy = 1 / np.log(10) * np.multiply(dy, 1/y)
+    yerr = np.zeros([2,len(y)])
+    yerr[0] = np.multiply( y, 1 - 1/(10**dy) )
+    yerr[1] = np.multiply( y, 10**dy - 1 )
+
+    ax.errorbar(x, y, yerr = yerr, **kwargs)
+    
