@@ -307,6 +307,7 @@ def importScreen( fname, index_screens = [], show = False, pNames = [] ):
             if not spos in screenPos:
                 screenPos.append(spos)
             df = pd.read_csv(pname, sep='\t', skiprows = 1, header = None, names = pNames)
+            df = df.reset_index()
             df['screenPos'] = np.ones( len(df.index) ) * spos
             df['screenNum'] = np.ones( len(df.index) ) * s
             data.append( df  )
@@ -364,6 +365,7 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
     poss = fname.rfind('#')
     data = []
     screenPos = []
+    ogN = 0
     for s in range(nums):
         if (not s in index_screens) and len(index_screens) > 0:
             continue
@@ -386,7 +388,9 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
             if show:
                 print('Reading', pname)
             df = pd.read_csv(pname, sep='\t', skiprows = 1, header = None, names = pNames)
+            df = df.reset_index()
             if reduce_factor > 1:
+                ogN += df.shape[0]
                 d = []
                 for i in range(df.shape[0]):
                     if np.random.rand() > 1 / reduce_factor:
@@ -408,6 +412,8 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
             else:
                 y = np.append(y,np.array(df[yquant]))
     screenPos.sort()
+    if reduce_factor > 1:
+        print(ogN, 'particles has been reduced to', len(x))
     if show:
         print('Screens at ', screenPos)
 
