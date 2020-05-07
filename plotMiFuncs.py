@@ -318,7 +318,7 @@ def importScreen( fname, index_screens = [], show = False, pNames = [] ):
     return [pd.concat(data), screenPos]
 
 
-def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant = 't', yquant = 'E', index_screen = 0, reduce_factor = 1 ):
+def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant = 't', yquant = 'E', index_screen = 0, reduce_factor = 1, sliceT = [] ):
     ''' 
     Returns x and y of the bunch screen data
     -fname : (String) Filename to read data from. Put # instead of numbers. eg tests/test2/bunch-screen/bunch-p#-screen#.txt
@@ -360,6 +360,7 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
         index_screen += nums
     x = np.empty(0)
     y = np.empty(0)
+    t = np.empty(0)
     # Get the data
     posp = fname.find('#')
     poss = fname.rfind('#')
@@ -397,6 +398,8 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
                         d.append(i)
                 df = df.drop(d)
             x = np.append(x,np.array(df[xquant]))
+            if len(sliceT) == 2:
+                t = np.append(t,np.array(df['t']))
             if yquant == 'E':
                 mc2 = .511 * 1e6  # eV/c2 electron mass
                 px = np.array(df['px'])
@@ -414,6 +417,15 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
     screenPos.sort()
     if reduce_factor > 1:
         print(ogN, 'particles has been reduced to', len(x))
+    if len(sliceT) == 2:
+        t *= -1
+        t -= t.mean()
+        delI = []
+        for i,ti in enumerate(t):
+            if ti < sliceT[0] or ti > sliceT[1]:
+                delI.append(i)
+        x = np.delete(x, delI)
+        y = np.delete(y, delI)
     if show:
         print('Screens at ', screenPos)
 
