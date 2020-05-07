@@ -47,7 +47,7 @@ def importStat( fname, show = False ):
     -show  : (Boolean) Print column names
     '''
     df = pd.read_csv(fname, sep='\t', header = None, index_col = False, names = sampNames)
-    df = df.dropna(axis = 'columns')
+    df = df.dropna()
     if show:
         print( fname )
     return df
@@ -791,4 +791,3 @@ def log_errorbary(ax, x, y, yerr, **kwargs):
     yerr[1] = np.multiply( y, 10**dy - 1 )
 
     ax.errorbar(x, y, yerr = yerr, **kwargs)
-    
