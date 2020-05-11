@@ -418,8 +418,8 @@ def importScreenXY( fname, index_screens = [], show = False, pNames = [], xquant
     if reduce_factor > 1:
         print(ogN, 'particles has been reduced to', len(x))
     if len(sliceT) == 2:
-        t *= -1
         t -= t.mean()
+        t *= -1
         delI = []
         for i,ti in enumerate(t):
             if ti < sliceT[0] or ti > sliceT[1]:
