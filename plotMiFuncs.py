@@ -544,7 +544,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy 
         ax.plot( bin_edges[1:] - .5*bin_size, bin_means, zorder = 2, lw = lw, ls = ls)
 
     ax.tick_params( axis = 'both', labelsize = fs )
-    ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-1, 3) )
+    ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-1, 3), useOffset = False )
     ax.set_xlabel( labs[0], fontsize = fs )
     ax.set_ylabel( labs[1], fontsize = fs )
 #     ax.text( 1.2, .4, str(screenPos) + ' m', transform=ax.transAxes, fontsize = fs, ha='center' )
@@ -641,7 +641,7 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
         ax.plot( bin_edges[1:] - .5*bin_size, bin_means, zorder = 2, lw = lw, ls = ls)
 
     ax.tick_params( axis = 'both', labelsize = fs )
-    ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-1, 3) )
+    ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-1, 3), useOffset = False )
     ax.set_xlabel( labs[0], fontsize = fs )
     ax.set_ylabel( labs[1], fontsize = fs )
 
