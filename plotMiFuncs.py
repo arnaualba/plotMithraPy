@@ -21,6 +21,7 @@ units = {
 
 colors = [ 'k', 'b', 'r', 'g', 'y', 'm', 'c' ]
 fs = 14  # Default fontsize
+clight = 3e8
 
 sampNames = ['t', 'x', 'y','z', 'px', 'py','pz',
              'sig_x', 'sig_y', 'sig_z', 'sig_px', 'sig_py', 'sig_pz']
@@ -46,24 +47,46 @@ def importStat( fname, show = False ):
     -fname : (String) Filename to read data from
     -show  : (Boolean) Print column names
     '''
+    sampNames = ['t', 'x', 'y','z', 'px', 'py','pz',
+                 'sig_x', 'sig_y', 'sig_z', 'sig_px', 'sig_py', 'sig_pz']
+    sampUnits = ['s', 'm', 'm', 'm', ' ', ' ', ' ',
+                 'm', 'm', 'm', ' ', ' ', ' ', 'm', ' ']
     df = pd.read_csv(fname, sep='\t', header = None, index_col = False, names = sampNames)
     df = df.dropna()
     if show:
         print( fname )
     return df
 
-def plotStat( ax, df, quants, factors = [1,1], fs = fs, **kwargs):
+def plotStat( ax, df, quants, factors = [1,1], fs = fs, gamma_ = 1, z_lab_shift = 0, **kwargs):
     ''' 
     Plots given quantities on axis ax
     -ax : (matplotlib axis)
     -df : (dataFrame)
     -quants : (list of strings) Have to be a column names
     -factors : (list of floats)
+    -gamma_ : (double > 1) gamma un undulator, used to compute z_lab
+    -z_lab_shift : (double) When getting z_lab, a shift can be added to get the real position of z_lab
     '''
-    # Get quantities to plot
     quants = ['z_lab', 'z_lab'] + quants  # Plot z_lab if an empty list was given
-    x = np.array( df[quants[-2]] )
-    y = np.array( df[quants[-1]] )
+    sampNames = ['t', 'x', 'y','z', 'px', 'py','pz',
+                 'sig_x', 'sig_y', 'sig_z', 'sig_px', 'sig_py', 'sig_pz']
+    sampUnits = ['s', 'm', 'm', 'm', ' ', ' ', ' ',
+                 'm', 'm', 'm', ' ', ' ', ' ', 'm', ' ']
+    # Create z_lab if necessary
+    if 'z_lab' in quants[2:]:
+        beta_ = np.sqrt(1 - 1 / gamma_**2)
+        t = df['t']
+        z = df['z']
+        z_lab = [gamma_ * (z[i] + beta_ * clight * t[i]) for i,_ in enumerate(t)]
+        if z_lab_shift != 0:
+            z_lab += z_lab_shift - z_lab[0]
+        df = df.assign(z_lab = z_lab)
+        sampNames.append('z_lab')
+        sampUnits.append('m')
+        
+    # Get quantities to plot        
+    x = np.array(df[quants[-2]])
+    y = np.array(df[quants[-1]])
 
     # Get units
     factors = [1, 1] + factors
@@ -553,7 +576,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy 
 
 
 def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
-                  type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0, maxHH = .3):
+                  type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0, maxHH = .3, enable_cbar = True):
     '''
     Plots the data given. 
     -ax : (matplotlib axis)
@@ -572,8 +595,8 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
     -- 'hist2d-hist' for both
     -nbins : (int) Number of bins to use for the histograms and the modulation plot
     '''
-    pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz']
-    pUnits = [' ', 'm', 'm', 's', ' ', ' ', ' ' ]
+    pNames = ['q', 'x', 'y', 't', 'px', 'py', 'pz', 'z']
+    pUnits = [' ', 'm', 'm', 's', ' ', ' ', ' ', 'm' ]
 
     clight = 3e8
     pNames = pNames + ['E']
@@ -618,8 +641,9 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
         ax.scatter( x[::nbins], y[::nbins], marker = '.', color = 'C' + str(color), zorder = 2)
     elif 'hist2d' in type:
         hi = ax.hist2d( x, y, bins = nbins, cmin = 1 , cmap=plt.cm.jet, zorder = 2)
-        cbar = plt.colorbar(hi[3], ax = ax)
-        cbar.set_label('Number of macro particles', fontsize = 10)
+        if enable_cbar == True:
+            cbar = plt.colorbar(hi[3], ax = ax)
+            cbar.set_label('Number of macro particles', fontsize = 10)
         if type == 'hist2d-hist':
             ax2 = ax.twinx()
             hist, xPoints = np.histogram(x, bins = nbins, density = True)
