@@ -550,7 +550,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy 
             ax2 = ax.twinx()
             hist, xPoints = np.histogram(x, bins = nbins, density = True)
             xPoints += .5 * (xPoints[1] - xPoints[0])
-            ax2.bar(xPoints[:-1], hist / np.max(hist) * maxHH, width = xPoints[1] - xPoints[0], color = 'C' + str(color))
+            ax2.plot(xPoints[:-1], hist / np.max(hist) * maxHH, width = xPoints[1] - xPoints[0], color = 'C' + str(color))
             ax2.set_ylim(0, 1)
             ax2.tick_params(axis='y', right = False, labelright = False)
     elif type == 'hist':
@@ -576,7 +576,7 @@ def plotScreen( ax, df, quants, screenNum = 0, factors = [1,1], limx = [], limy 
 
 
 def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
-                  type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0, maxHH = .3, enable_cbar = True):
+                  type = 'hist2d', nbins = 100, fs = 14, ls = '-', lw = 2, color = 0, maxHH = .3, enable_cbar = True, denomYhist = 2):
     '''
     Plots the data given. 
     -ax : (matplotlib axis)
@@ -645,12 +645,23 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
             cbar = plt.colorbar(hi[3], ax = ax)
             cbar.set_label('Number of macro particles', fontsize = 10)
         if type == 'hist2d-hist':
+            nbinsHist = 50
             ax2 = ax.twinx()
-            hist, xPoints = np.histogram(x, bins = nbins, density = True)
+            hist, xPoints = np.histogram(x, bins = nbinsHist, density = True)
+            FWHMx = getFWHM(hist, xPoints)
+            stdx = np.std(x)
             xPoints += .5 * (xPoints[1] - xPoints[0])
-            ax2.bar(xPoints[:-1], hist / np.max(hist) * maxHH, width = xPoints[1] - xPoints[0], color = 'C' + str(color))
+            ax2.plot(xPoints[:-1], hist / np.max(hist) * maxHH, lw = 3, color = 'C' + str(color))
             ax2.set_ylim(0, 1)
             ax2.tick_params(axis='y', right = False, labelright = False)
+            ax3 = ax.twiny()
+            hist, xPoints = np.histogram(y, bins = nbinsHist, density = True)
+            FWHMy = getFWHM(hist, xPoints, denom = denomYhist)
+            stdy = np.std(y)
+            xPoints += .5 * (xPoints[1] - xPoints[0])
+            ax3.plot(1 - hist / np.max(hist) * maxHH, xPoints[:-1], lw = 3, color = 'C' + str(color))
+            ax3.set_xlim(0, 1)
+            ax3.tick_params(axis='x', top = False, labeltop = False)
     elif type == 'hist':
         ax.hist( x, bins = nbins, color = 'C' + str(color), zorder = 2 )
         labs[1] = 'Density [arb]'
@@ -668,7 +679,10 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
     ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-1, 3), useOffset = False )
     ax.set_xlabel( labs[0], fontsize = fs )
     ax.set_ylabel( labs[1], fontsize = fs )
-
+    if type == 'hist2d-hist':
+        return [stdx, FWHMx, stdy, FWHMy]
+    else:
+        return 0
 
 def getFromSlurm( rowVar, line, show = False ):
     '''
@@ -827,3 +841,13 @@ def log_errorbary(ax, x, y, yerr, **kwargs):
     yerr[1] = np.multiply( y, 10**dy - 1 )
 
     ax.errorbar(x, y, yerr = yerr, **kwargs)
+
+def getFWHM(hist, bin_edges, denom = 2):
+    HM = np.max(hist) / denom
+    for i,edge in enumerate(bin_edges[1:-1]):
+        if hist[i] < HM and hist[i+1] >= HM:
+            left = edge
+        elif hist[i] > HM and hist[i+1] <= HM:
+            right = edge
+    return right - left
+    
