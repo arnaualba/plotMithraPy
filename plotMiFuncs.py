@@ -682,7 +682,7 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
     if type == 'hist2d-hist':
         return [stdx, FWHMx, stdy, FWHMy]
     else:
-        return 0
+        return [0,0,0,0]
 
 def getFromSlurm( rowVar, line, show = False ):
     '''
@@ -844,10 +844,13 @@ def log_errorbary(ax, x, y, yerr, **kwargs):
 
 def getFWHM(hist, bin_edges, denom = 2):
     HM = np.max(hist) / denom
+    right = bin_edges[-1]
+    left = bin_edges[0]
     for i,edge in enumerate(bin_edges[1:-1]):
         if hist[i] < HM and hist[i+1] >= HM:
             left = edge
         elif hist[i] > HM and hist[i+1] <= HM:
             right = edge
+            
     return right - left
     
