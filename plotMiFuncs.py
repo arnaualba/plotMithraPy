@@ -658,8 +658,12 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
             hist, xPoints = np.histogram(y, bins = nbinsHist, density = True)
             FWHMy = getFWHM(hist, xPoints, denom = denomYhist)
             stdy = np.std(y)
-            xPoints += .5 * (xPoints[1] - xPoints[0])
-            ax3.plot(1 - hist / np.max(hist) * maxHH, xPoints[:-1], lw = 3, color = 'C' + str(color))
+            binsize = xPoints[1] - xPoints[0]
+            xPoints += .5 * binsize
+            xPoints = np.insert(xPoints, 0, xPoints[0] - binsize)
+            hist = np.insert(hist, 0, 0.0)
+            hist = np.append(hist, 0.0)
+            ax3.plot(1 - hist / np.max(hist) * maxHH, xPoints, lw = 3, color = 'C' + str(color))
             ax3.set_xlim(0, 1)
             ax3.tick_params(axis='x', top = False, labeltop = False)
     elif type == 'hist':
