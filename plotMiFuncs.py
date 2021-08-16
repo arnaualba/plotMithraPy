@@ -651,7 +651,7 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
             FWHMx = getFWHM(hist, xPoints)
             stdx = np.std(x)
             xPoints += .5 * (xPoints[1] - xPoints[0])
-            ax2.plot(xPoints[:-1], hist / np.max(hist) * maxHH, lw = 3, color = 'C' + str(color))
+            ax2.plot(xPoints[:-1], hist / np.max(hist) * maxHH, lw = lw, color = 'C' + str(color), ls = ls)
             ax2.set_ylim(0, 1)
             ax2.tick_params(axis='y', right = False, labelright = False)
             ax3 = ax.twiny()
@@ -663,7 +663,7 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
             xPoints = np.insert(xPoints, 0, xPoints[0] - binsize)
             hist = np.insert(hist, 0, 0.0)
             hist = np.append(hist, 0.0)
-            ax3.plot(1 - hist / np.max(hist) * maxHH, xPoints, lw = 3, color = 'C' + str(color))
+            ax3.plot(1 - hist / np.max(hist) * maxHH, xPoints, lw = lw, color = 'C' + str(color), ls = ls)
             ax3.set_xlim(0, 1)
             ax3.tick_params(axis='x', top = False, labeltop = False)
     elif type == 'hist':
