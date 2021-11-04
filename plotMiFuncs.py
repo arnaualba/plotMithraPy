@@ -5,6 +5,7 @@ import matplotlib
 from decimal import Decimal
 import os
 from datetime import date
+from scipy import ndimage, integrate, interpolate, signal
 
 units = {
     'T' : 1e-12,
@@ -674,13 +675,14 @@ def plotScreenXY( ax, x, y, quants, factors = [1,1], limx = [], limy = [],
         bin_size = bin_edges[1] - bin_edges[0]
         digitized = np.digitize( x, bin_edges )  # Get data organised in bins
         bin_means = [y[digitized == i].mean() for i in range(1, len(bin_edges))]
+        bin_edges = bin_edges[1:] - .5*bin_size
 #        bin_means -= bin_means[0]
         bin_means -= np.array(bin_means).mean()
         labs[1] = '$\Delta$' + labs[1]
-        ax.plot( bin_edges[1:] - .5*bin_size, bin_means, zorder = 2, lw = lw, ls = ls)
+        ax.plot(bin_edges, bin_means, zorder = 2, lw = lw, ls = ls, color = 'C' + str(color))
 
     ax.tick_params( axis = 'both', labelsize = fs )
-    ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-1, 3), useOffset = False )
+    ax.ticklabel_format( axis = 'both', style = 'sci', scilimits = (-2, 3), useOffset = False )
     ax.set_xlabel( labs[0], fontsize = fs )
     ax.set_ylabel( labs[1], fontsize = fs )
     if type == 'hist2d-hist':
@@ -858,3 +860,572 @@ def getFWHM(hist, bin_edges, denom = 2):
             
     return right - left
     
+def flatten_out_line(x,y):
+    id2 = np.argmax(y)
+    id1 = np.argmin(y)
+    return (y[id2] - y[id1]) / (x[id2] - x[id1])
+
+
+def getM (fn, crop = [], rot = 0, size_filter = 2, r = 0):
+    '''
+    Read .rimg file with filename fn
+    Crop is optional, and should be 4 numbers between 0 and 1, meaning the percentage of image cut from left,right,top, bottom
+    rot is how much the image is rotated in degrees
+    size_filter is how many nearest neighbouring pixels are averaged
+    returns the M matrix after neede transformations
+    '''
+    print('opening', fn)
+    f = open(fn)
+    for i, line in enumerate(f):
+        if i == 0:
+            txt = line.replace('\n', ' ')
+            print(txt)
+            start = txt.find('x:')
+            end = txt[start:].find(' ')
+            lenx = int(txt[start+2:start+end])
+            start = txt.find('y:')
+            end = txt[start:].find(' ')
+            leny = int(txt[start+2:start+end])
+            M = np.zeros((leny, lenx))
+        else:
+            txt = line.strip()
+            txt = txt.split()
+            for j in range(lenx):
+                M[i-1,j] = txt[j]
+    f.close()
+    
+    M = ndimage.rotate(M, rot)
+    M = np.flip(M.T, axis = 1)
+    M *= 1/np.max(M)
+    M = ndimage.median_filter(M, size = size_filter)
+    M -= np.mean(M)  # Subtract background
+    M[M < 0] = 0
+    print('shape after post-processing and cropping', M.shape)
+    
+    if len(crop) == 4:
+        length = M.shape[1]
+        M = M[:, int(crop[0] * length) : int(crop[1] * length)]
+        height = M.shape[0]
+        M = M[int(crop[2] * height) : int(crop[3] * height), :]
+    else:
+        # Automatic cropping
+        height = M.shape[0]
+        M = M[int(0.3 * height) : int(0.7 * height), :]
+        length = M.shape[1]
+        M = M[:, int(0.2 * length) : int(0.8 * length)]
+        cg = ndimage.measurements.center_of_mass(M)
+        cg = np.asarray(cg).astype(int)
+        if r == 0:
+            for r in range(5,np.min(M.shape)):
+                if np.max(getR(M, r, cg)) <= 0:
+                    break
+        print('Cropped with r = ', r, 'pixels')
+        crop = [(cg[1]-r) / length + 0.2,
+                (cg[1]+r) / length + 0.2,
+                (cg[0]-r) / height + 0.3,
+                (cg[0]+r) / height + 0.3]
+        print('Cropped at', '[{:.2f}, '.format(crop[0]), '{:.2f}, '.format(crop[1]),
+              '{:.2f}, '.format(crop[2]), '{:.2f}]'.format(crop[3]))
+        M = M[cg[0]-r:cg[0]+r, cg[1]-r:cg[1]+r]
+    return M
+
+
+def getR(M, r, cg):
+    '''
+    Get all pixels on the square at distance r from cg
+    cg is the center of mass
+    r is the radius around cg to start from
+    '''
+    length = M.shape[1]
+    height = M.shape[0]
+    if cg[1]-r < 0 or cg[1]+r >= length or cg[0]-r < 0 or cg[0]+r >= height:
+        print('R scan has reached matrix limit')
+        return np.array([0,0])
+    R = []
+    for i in range(cg[0]-r, cg[0]+r+1):
+        R.append(M[i,cg[1]-r])
+        R.append(M[i,cg[1]+r])
+    for i in range(cg[1]-r, cg[1]+r+1):
+        R.append(M[cg[0]-r,i])
+        R.append(M[cg[0]+r,i])
+    return np.array(R)
+
+              
+def integrateMatrix(M, axis = 0):
+    '''
+    Sum of all points on line or column 
+    '''
+    Mloc = M
+    if axis == 1:
+        Mloc = Mloc.T
+    vec = np.zeros(Mloc.shape[1])
+    for i in range(Mloc.shape[1]):
+        vec[i] = np.sum(Mloc[:,i])
+    return vec
+
+
+def histAx2(ax, M, axis = 0, xlims = [], maxHH = .3, plot = True, shift = 0, **kwargs):
+    '''
+    get histogram of array M along an axis.
+    xlims should be two points, which are the extents of the real-life distance that the matrix represents
+    if plot, the histogram will be plotted as a line-plot on the matplotlib axis ax
+    maxHH is a number from 0 to 1 saying how high theline plot should be when plotted
+    shift is the number of matrix points to shift by the histogram
+    '''
+    hist = integrateMatrix(M, axis = axis)
+    hist = ndimage.interpolation.shift(hist, shift, cval = 0.0)
+    if axis == 0:
+        xPoints = np.linspace(xlims[0], xlims[1], len(hist) + 1)[:-1]
+        xPoints += .5 * (xPoints[1] - xPoints[0])
+        if plot:
+            ax.plot(xPoints, hist / np.max(hist) * maxHH * np.diff(xlims[-2:]) + xlims[2], **kwargs)
+    elif axis == 1:
+        hist = np.flip(hist)
+        xPoints = np.linspace(xlims[-2], xlims[-1], len(hist) + 1)[:-1]
+        xPoints += .5 * (xPoints[1] - xPoints[0])
+        if plot:
+            ax.plot(xlims[1] - hist / np.max(hist) * maxHH * np.diff(xlims[:2]), xPoints, **kwargs)
+    return [xPoints, hist]
+
+
+def histAx(ax, x, axis = 0, bins = 50, maxHH = .3, flip = True, **kwargs):
+    '''
+    Plots a histogram of x (an array of points) on ax, with maximum height maxHH (percentage)
+    '''
+    [hist,bs] = np.histogram(x, bins = bins)
+    xlims = np.array([np.min(x), np.max(x)])
+    if axis == 0:
+        ax2 = ax.twinx()
+        bs = bs[:-1]
+        bs += .5 * (bs[1] - bs[0])
+        ax2.plot(bs, hist / np.max(hist) * maxHH, **kwargs)
+        ax2.set_ylim(0, 1)
+        ax2.tick_params(axis='y', right = False, labelright = False)
+    elif axis == 1:
+        if flip:
+            hist = np.flip(hist)
+        ax2 = ax.twiny()
+        bs = bs[:-1]
+        bs += .5 * (bs[1] - bs[0])
+        ax2.plot(1 - hist / np.max(hist) * maxHH, bs, **kwargs)
+        ax2.set_xlim(0, 1)
+        ax2.tick_params(axis='x', top = False, labeltop = False)
+    return [bs, hist]
+
+
+def getFWHM(x, hist, denom = 2):
+    '''
+    Returns FWHM of quantity x (an array of points)
+    It also returns the right and left edges of the FWHM
+    In fact, the returned quantity is the width of the distibution at maximum/denom. So for denom=2 we get FWHM
+    '''
+    idx = np.argmax(hist)
+    HM = np.max(hist) / denom
+    right = x[-1]
+    left = x[0]
+    for i in range(idx, len(hist)):
+        if hist[i] < HM:
+            right = x[i]
+            break
+    for i in range(idx, -1, -1):
+        if hist[i] < HM:
+            left = x[i]
+            break
+    FWHM = right - left
+    return [FWHM,[right,left]]
+
+
+def getFWHmean(x, hist, denom = 2):
+    '''
+    Same as getFWHM but uses the mean instead of the maximum
+    '''
+    mean = np.sum(hist * x) / np.sum(hist)
+    idx = np.argmin(np.abs(x - mean))
+    HM = hist[idx] / denom
+    right = x[-1]
+    left = x[0]
+    for i in range(idx, len(hist)):
+        if hist[i] < HM:
+            right = x[i]
+            break
+    for i in range(idx, -1, -1):
+        if hist[i] < HM:
+            left = x[i]
+            break
+    FWHM = right - left
+    return [FWHM,[right,left]]
+
+
+def getRms(x, hist):
+    '''
+    Returns the rms of x (an array of points)
+    '''
+    mean = 0
+    mom2 = 0
+    N = 0
+    for i, n in enumerate(hist):
+        mean += x[i] * n
+        mom2 += x[i]**2 * n
+        N += n
+    return np.sqrt(mom2 / N - (mean / N)**2)
+
+
+def integrateCharge(fn, size_filter = 8, show = False):
+    '''
+    Reads a .rict file and integrates it to get the total charge
+    Size filter is how many array points to average out to remove high_frequencies
+    If show, it plots the .rict charge file
+    '''
+    factor = 1.25  # ICT calibration factor
+    df = pd.read_csv(fn, skiprows = 1, sep = r'\s+', names = ['t', 'Q'])
+    t = df['t']
+    Q = df['Q']
+    Q = ndimage.median_filter(Q, size = size_filter)
+    Q -= np.mean(Q)
+    idxmin = np.argmin(Q)
+    lims = np.zeros(2)
+    for i in range(idxmin, len(Q)-1):
+        if Q[i] > 0:
+            lims[1] = t[i]
+            break
+    for i in range(idxmin, -1, -1):
+        if Q[i] > 0:
+            lims[0] = t[i]
+            break
+    for i,ti in enumerate(t):
+        if ti < lims[0] or ti > lims[1]:
+            Q[i] = 0
+    if show:
+        fig, ax = plt.subplots()
+        ax.plot(t,Q)
+        ax.axvline(lims[0], color = 'green')
+        ax.axvline(lims[1], color = 'green')
+        plt.show()
+    return integrate.trapz(x = t, y = Q) / factor
+
+
+def zoom_M(M, zoom = [1,1]):
+    '''
+    Zooms in or out of image, but maintains a constant matrix size
+    '''
+    zoom.reverse()
+    initShape = M.shape
+    CM = M.copy()
+    CM = ndimage.zoom(CM,zoom)
+    
+    # Now adjust the number of pixels
+    for i in range(2):
+        if i == 1:
+            CM = CM.T
+        tmp = (CM.shape[0] - initShape[i])
+        tmp2 = tmp//2
+        tmp = tmp - tmp2
+        if tmp > 0:
+            CM = CM[tmp:-tmp2,:]
+        elif tmp < 0:
+            tmp = np.zeros((-tmp,CM.shape[1]))
+            tmp2 = np.zeros((-tmp2,CM.shape[1]))
+            CM = np.concatenate((tmp,CM,tmp2), axis = 0)
+        if i == 1:
+            CM = CM.T
+    return CM
+
+
+def trafo_dist_M(M, M2, axis = 0, plot = False, shift = 0):
+    '''
+    - M and M2 are made to be equal along axis. If plot, we see the before and after images of the histograms
+    - M and M2 need to have the same size along axis i
+    Returns M, which has been modified based on M2
+    '''
+    M1 = M.copy()
+    # Get hists
+    hist1 = integrateMatrix(M1, axis = axis)
+    hist2 = integrateMatrix(M2, axis = axis)
+    # Shift hists to agree
+    hist2 = ndimage.interpolation.shift(hist2, shift, cval = 0.0)
+    # Add new hist
+    if axis == 1:
+        M1 = M1.T
+    for i,_ in enumerate(hist1):
+        if hist1[i] != 0:
+            for j in range(M1.shape[0]):
+#                 M1[j,i] += hist2[i] * M1[j,i] / hist1[i]  # Old Method. I think it's wrong
+                M1[j,i] = hist2[i] * M1[j,i] / hist1[i]
+    if axis == 1:
+        M1 = M1.T
+    # Plot the hists
+    if plot:
+        hist2 = hist2 / hist2.max() * hist1.max()  # Normalise just for nicer plot
+        figloc, axloc = plt.subplots()
+        axloc.plot(hist1)
+        axloc.plot(hist2)
+        axloc.legend(['hist1', 'hist2'])
+    return M1
+
+
+def get_stats(fn, show = False):
+    '''
+    Get stats from the OPAL statfile
+    returns the stats as a dataframe, and also the list of names and units as strings
+    '''
+    print(fn)
+    text = open( fn, 'r' )
+    names = []
+    units = []
+    for line in text:
+        if 'name' in line:
+            ind1 = line.find('=')
+            ind2 = line.find(',')
+            name = line[ind1+1:ind2]
+        if 'units' in line:
+            ind1 = line.find('=')
+            ind2 = line.find(',')
+            unit = line[ind1+1:ind2]
+            if unit == '1':
+                unit = ' '
+            names.append( name )
+            units.append( unit )
+    if show:
+        for i, n in enumerate(names):        
+            print( i, n, ' [', units[i], ']' )
+    stat = pd.read_csv( filepath_or_buffer = fn,
+                        skiprows = 279, sep = '\\s+', names = names)
+    return[stat, names, units]
+
+
+def g_from_p(px,py,pz):
+    'gamma from momentum vector'
+    return np.sqrt(1 + px**2+py**2+pz**2)
+
+
+def get_stats_mithra(fn, E, shift, K = 10.81):
+    '''
+    - fn: file with undulator.stat
+    - E: energy in MeV of beam
+    - sOpal: array of s from the OPAL stat file
+    - sig_yOpal: array of sig_y from the OPAL stat file
+    - K: Undulator strength parameters
+    '''
+    if os.path.isfile(fn) == True:
+        # Get stats
+        print('Getting stats from Mithra at', fn)
+        statMi = pmf.importStat(fn, show = False)
+        t = statMi['t']
+        z = statMi['z']
+        sigz = statMi['sig_z']
+        pz = statMi['pz']
+        sigpz = statMi['sig_pz']
+        x = statMi['x']
+        sigx = statMi['sig_x']
+        px = statMi['px']
+        sigpx = statMi['sig_px']
+        y = statMi['y']
+        sigy = statMi['sig_y']
+        py = statMi['py']
+        sigpy = statMi['sig_py']
+        
+        gamma_ = E / .511 / np.sqrt(1 + .5 * K**2)
+        beta_ = np.sqrt(1 - 1 / gamma_**2)
+        clight = 3e8
+        
+        # Lorentz transforms
+        z = [gamma_ * (z[i] + beta_ * clight * t[i]) for i,_ in enumerate(t)]
+        z = z - z[0] + shift
+        
+        stat = pd.DataFrame({'s': z, 'rms_x': sigx, 'rms_y': sigy})
+    else:
+        stat = pd.DataFrame()
+        print('No Mithra file found')
+    
+    return stat
+
+
+def get_transverse_params(fn, L, l = 0.05, plot = False, Qs = [], startpoint = 0.0):
+    '''
+    Takes that statfile fn.
+    Then it takes sigx,sigy,sigpx,sigpy at point startpoint. (startpoint needs to be within the range of the stat file simulation
+    Then, using transfer matrices, it transports the transverse parameters for a length L
+    l is the time-step, and it can be negative for back-tracking
+    It uses drifts of length l, but can also do quadrupoles. 
+    Qs is the list of Quadrupole positions and strengths in T/m (remark: There is a factor that might need adjusting in this function)
+    Qs is a list of tuples or arrays, each of two elements = [pos Q, strength Q]
+    It returns the final transverse beam parameters
+    If plot is true it also makes a plot of the transverse parameters
+    '''
+    [stats,_,_] = get_stats(fn, show = False)
+    
+    
+    steps = np.linspace(0.0, L,int(L // np.abs(l)))
+    if l < 0.0:
+        steps = np.flip(steps)
+    if startpoint > 0.0:
+        idx = np.argmin(abs(steps - startpoint))
+        steps = steps[idx:]
+        idx = np.argmin(abs(stats['s'] - startpoint))
+    else:
+        idx = 0
+        
+    # Get initial parameters
+    gamma = stats['energy'][idx] / .511
+    print('gamma', gamma)
+    x = stats['rms_x'][idx]
+    px = stats['rms_px'][idx] / gamma
+    xpx = stats['xpx'][idx] * x * px
+    y = stats['rms_y'][idx]
+    py = stats['rms_py'][idx] / gamma
+    ypy = stats['ypy'][idx] * y * py
+
+    vec = np.array([[x**2, xpx, 0., 0.], [xpx, px**2, 0., 0.],
+                  [0.,0.,y**2, ypy],[0.,0., ypy, py**2]])
+    print('Initial state\n', vec)
+    
+    # Set up transfer matrix
+    M = np.diag(np.ones(4)) + np.diag([l, 0., l], k = 1)
+    print('Transfer matrix M\n', M)
+    
+    # Set up quad matrices
+    factor = .6
+    for i,Q in enumerate(Qs):
+        Qs[i] = [Q[0], np.diag(np.ones(4)) + Q[1] * factor * np.diag([1., 0., -1.], k = -1)]
+    if len(Qs) > 0:
+        print('Example quadrupole matrix Q\n', Qs[0][1])
+    
+    # Time evolution of the bunch
+    x = np.zeros([len(steps),3])
+    y = np.zeros([len(steps),3])
+    for i,step in enumerate(steps):
+        x[i,:] = np.array([np.sqrt(vec[0,0]), np.sqrt(vec[1,1]) * gamma, 
+                           vec[0,1] / np.sqrt(vec[0,0] * vec[1,1])])
+        y[i,:] = np.array([np.sqrt(vec[2,2]), np.sqrt(vec[3,3]) * gamma, 
+                           vec[2,3] / np.sqrt(vec[2,2] * vec[3,3])])     
+        if len(Qs) > 0  and Qs[0][0] <= step:
+            Q = Qs.pop(0)[1]
+            vec = np.dot(np.dot(Q,vec),Q.T)
+        else:
+            vec = np.dot(np.dot(M,vec),M.T)
+              
+    # Plot
+    if plot:
+        lw = 5
+        fig, ax = plt.subplots(1,3,figsize = (12,5))
+        ax = ax.reshape(-1)
+        ax[0].plot(steps, x[:,0], lw = lw-2, color = 'red')
+        ax[0].plot(steps, y[:,0], lw = lw-2, color = 'blue')
+        ax[0].plot(stats['s'][idx:], stats['rms_x'][idx:], lw = lw, ls = '--', color = 'green')
+        ax[0].plot(stats['s'][idx:], stats['rms_y'][idx:], lw = lw, ls = '--', color = 'black')
+        ax[0].set_ylim(top = 1.1*np.max(stats['rms_y']))
+        
+        ax[1].plot(steps, x[:,1], lw = lw-2, color = 'red')
+        ax[1].plot(steps, y[:,1], lw = lw-2, color = 'blue')
+        ax[1].plot(stats['s'][idx:], stats['rms_px'][idx:], lw = lw, ls = ':', color = 'green')
+        ax[1].plot(stats['s'][idx:], stats['rms_py'][idx:], lw = lw, ls = ':', color = 'black')
+        
+        ax[2].plot(steps, x[:,2], lw = lw-2, color = 'red')
+        ax[2].plot(steps, y[:,2], lw = lw-2, color = 'blue')
+        ax[2].plot(stats['s'][idx:], stats['xpx'][idx:], lw = lw, ls = ':', color = 'green')
+        ax[2].plot(stats['s'][idx:], stats['ypy'][idx:], lw = lw, ls = ':', color = 'black')
+        plt.show()
+        
+    return np.concatenate((x[-1,:],y[-1,:]))
+
+        
+def generate_transverse_phase_space(LPSFile, trans, outFile, E = 45.4, plot = False, 
+                                    plotFile = 'dummy.png', lw = 3, color = 2):
+    '''
+    Takes as input a csv file of the LPS, i.e. z and pz list of particles
+    It also takes the transverse beam parameters as an array sig[x,px,xpx,y,py,ypy]
+    It assumes that x,y,px,py on average are 0
+    It plots the resulting phase-space histogram in plotfile
+    It returns an outFile with x,px,y,py,z,pz, and the number of particles in the first line (file ready for OPAL)
+    At the moment it takes the energy, but actually it should compute it from pz
+    '''
+    
+    df = pd.read_csv(LPSFile, sep = r"\s+", skiprows = 1, names = ['z', 'pz'])
+    N = len(df['z'])
+    print("number of particles is", N)
+    gamma = E / .511
+
+    [x,px,xpx,y,py,ypy] = trans
+    cov = np.array([ [x**2, xpx * x * px],
+                     [xpx * x * px, px**2] ])
+    dat = np.random.multivariate_normal([0.0, 0.0], cov, N)
+    df['x'] = dat[:,0]
+    df['px'] = dat[:,1]
+
+    cov = np.array([ [y**2, ypy * y * py],
+                     [ypy * y * py, py**2] ])
+    dat = np.random.multivariate_normal([0.0, 0.0], cov, N)
+    df['y'] = dat[:,0]
+    df['py'] = dat[:,1]
+    
+    if plot:
+        fig,axs = plt.subplots(1, 3, figsize = (22,6))
+        fig.subplots_adjust(wspace=.25)
+        axs = axs.reshape(-1)
+        dfloc = df.copy()
+        pmf.plotScreenXY(axs[0], dfloc['x'], dfloc['px'], ['x', 'px'], 
+                         type = 'hist2d-hist', factors = [1e3, 1], 
+                         nbins = 200, color = color, maxHH = .2, enable_cbar = 0, lw = lw)
+        pmf.plotScreenXY(axs[1], dfloc['y'], dfloc['py'], ['y', 'py'], 
+                         type = 'hist2d-hist', factors = [1e3, 1], 
+                         nbins = 200, color = color, maxHH = .2, enable_cbar = 0, lw = lw)
+        pmf.plotScreenXY(axs[2], dfloc['z'], dfloc['pz'], ['z', 'pz'], 
+                         type = 'hist2d-hist', factors = [1e3, 1], 
+                         nbins = 200, color = color, maxHH = .2, enable_cbar = 0, lw = lw)
+        
+        for i in range(3):
+            axs[i].tick_params(axis = 'both', labelsize = fs)
+        
+        plt.savefig((pltpath + '/' + plotFile),bbox_inches='tight')
+        plt.show()
+
+    # Save distribution in file
+    ## Write particle number in first line
+    print('\nSaving particles in file...')
+    file = open(outFile, mode = 'w')
+    file.write(str(N) + '\n')
+    file.close()
+    ## Write the distribution
+    df = df[['x', 'px', 'y', 'py', 'z', 'pz']]
+    df.to_csv(outFile, sep = '\t', header = False, index = False, mode = 'a')
+
+def remove_bump(oldM, plot = False):
+    '''
+    Removes bump only from histogram on axis 1
+    It returns the fixed M and the ratio of integration of the curve that has changed, so that the charge can be divided by this too
+    '''
+    
+    # Get the hist
+    extent = np.array([-0.5, oldM.shape[1] - 0.5, -0.5, oldM.shape[0] - 0.5])
+    [_,oldHist] = histAx2(ax[0], M = oldM, axis = 1, xlims = extent, plot = False)
+    N = len(oldHist)
+    newHist = np.copy(oldHist)
+    
+    # Choose peak closest to centre
+    [peaks, props] = signal.find_peaks(oldHist, prominence = 1)
+    idx = 1
+    peak = peaks[idx]
+    [valleys, props] = signal.find_peaks(-oldHist, prominence = 1)
+    w2 = valleys[-1] - peak
+    keep_idx = [idx for idx in range(N) if idx < peak-w2-5 or idx > peak+w2+5]
+    
+    # Interpolate new points at place were peak is removed
+    f = interpolate.interp1d(keep_idx, oldHist[keep_idx], kind='quadratic')
+    
+    # Create new hist
+    for i in range(N):
+        if i not in keep_idx:
+            newHist[i] = f(i)
+            
+    # Compute ratio between integrals
+    ratio = np.sum(newHist) / np.sum(oldHist)
+    
+    # Create newM with correct distribution on axis 1, and dummy disto on the axis 0
+    newM = np.zeros(oldM.shape)
+    newM[:,0] = np.flip(newHist)
+    
+    # Now adjust matrix to have newHist
+    newM = trafo_dist_M(oldM, newM, axis = 1, plot = plot)
+
+    return [newM, ratio]
+
