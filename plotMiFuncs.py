@@ -5,7 +5,7 @@ import matplotlib
 from decimal import Decimal
 import os
 from datetime import date
-from scipy import ndimage, integrate, interpolate, signal
+from scipy import ndimage, integrate, interpolate, signal, stats
 
 units = {
     'T' : 1e-12,
@@ -964,27 +964,48 @@ def integrateMatrix(M, axis = 0):
     return vec
 
 
-def histAx2(ax, M, axis = 0, xlims = [], maxHH = .3, plot = True, shift = 0, **kwargs):
+def histAx2(ax, M, axis = 0, xlims = [], maxHH = .3, plot = True, shift = 0, cutoffs = [0,-1], show_cutoffs = False, **kwargs):
     '''
     get histogram of array M along an axis.
-    xlims should be two points, which are the extents of the real-life distance that the matrix represents
+    xlims should be two (or four) points, which are the extents of the real-life distance that the matrix represents
     if plot, the histogram will be plotted as a line-plot on the matplotlib axis ax
     maxHH is a number from 0 to 1 saying how high theline plot should be when plotted
     shift is the number of matrix points to shift by the histogram
+    - cutoffs is a 2 element list with cutoffs to consider in the histogram. Then the histogram is only returned within those cutoffs.
+    The cutoffs should be in pixel number.
+    - set show_cutoffs to True if you want to visualise the cutoffs
     '''
+
+    def apply_cutoff(h,x,c):
+        if c[1] == -1:
+            h = h[c[0]:]
+            x = x[c[0]:]
+        else:
+            h = h[c[0]:c[1]]
+            x = x[c[0]:c[1]]
+        return h,x
+        
     hist = integrateMatrix(M, axis = axis)
     hist = ndimage.interpolation.shift(hist, shift, cval = 0.0)
     if axis == 0:
         xPoints = np.linspace(xlims[0], xlims[1], len(hist) + 1)[:-1]
         xPoints += .5 * (xPoints[1] - xPoints[0])
+        hist, xPoints = apply_cutoff(hist,xPoints,cutoffs)
         if plot:
             ax.plot(xPoints, hist / np.max(hist) * maxHH * np.diff(xlims[-2:]) + xlims[2], **kwargs)
+            if show_cutoffs and cutoffs != [0,-1]:
+                ax.axvline(xPoints[0], lw = 3, color = 'orange')
+                ax.axvline(xPoints[-1], lw = 3, color = 'orange')
     elif axis == 1:
         hist = np.flip(hist)
         xPoints = np.linspace(xlims[-2], xlims[-1], len(hist) + 1)[:-1]
         xPoints += .5 * (xPoints[1] - xPoints[0])
+        hist, xPoints = apply_cutoff(hist,xPoints,cutoffs)
         if plot:
-            ax.plot(xlims[1] - hist / np.max(hist) * maxHH * np.diff(xlims[:2]), xPoints, **kwargs)
+            ax.plot(0.999*xlims[1] - hist / np.max(hist) * maxHH * np.diff(xlims[:2]), xPoints, **kwargs)
+            if show_cutoffs and cutoffs != [0,-1]:
+                ax.axhline(xPoints[0], lw = 3, color = 'orange')
+                ax.axhline(xPoints[-1], lw = 3, color = 'orange')
     return [xPoints, hist]
 
 
@@ -1104,55 +1125,46 @@ def integrateCharge(fn, size_filter = 8, show = False):
     return integrate.trapz(x = t, y = Q) / factor
 
 
-def zoom_M(M, zoom = [1,1]):
+def trafo_dist_M(M1, M2, axis = 0, plot = False, shift = 0):
     '''
-    Zooms in or out of image, but maintains a constant matrix size
-    '''
-    zoom.reverse()
-    initShape = M.shape
-    CM = M.copy()
-    CM = ndimage.zoom(CM,zoom)
-    
-    # Now adjust the number of pixels
-    for i in range(2):
-        if i == 1:
-            CM = CM.T
-        tmp = (CM.shape[0] - initShape[i])
-        tmp2 = tmp//2
-        tmp = tmp - tmp2
-        if tmp > 0:
-            CM = CM[tmp:-tmp2,:]
-        elif tmp < 0:
-            tmp = np.zeros((-tmp,CM.shape[1]))
-            tmp2 = np.zeros((-tmp2,CM.shape[1]))
-            CM = np.concatenate((tmp,CM,tmp2), axis = 0)
-        if i == 1:
-            CM = CM.T
-    return CM
-
-
-def trafo_dist_M(M, M2, axis = 0, plot = False, shift = 0):
-    '''
-    - M and M2 are made to be equal along axis. If plot, we see the before and after images of the histograms
-    - M and M2 need to have the same size along axis i
+    - M1 and M2 are made to be equal along axis. If plot, we see the before and after images of the histograms
     Returns M, which has been modified based on M2
+    M1 and M2 need to be in the same scale
     '''
-    M1 = M.copy()
-    # Get hists
-    hist1 = integrateMatrix(M1, axis = axis)
-    hist2 = integrateMatrix(M2, axis = axis)
+    if axis == 0:
+        M1 = M1.T
+        M2 = M2.T
+
+    # Get hists for zoom
+    hist1 = integrateMatrix(M1, axis = 1)
+    xs = np.linspace(0, 1, len(hist1), endpoint = False)
+    [f1,_] = getFWHM(xs, hist1)
+    hist2 = integrateMatrix(M2, axis = 1)
+    xs = np.linspace(0, 1, len(hist2), endpoint = False)
+    [f2,_] = getFWHM(xs, hist2)
+    M1 = zoom_M(M1, f2/f1, axis = 1)
+                        
+    # Adjust hist2 to have same number of pixels as hist2
+    hist1 = integrateMatrix(M1, axis = 1)
+    xs = np.linspace(0,1,len(hist2), endpoint = False) + 1/(2*len(hist2))
+    hist2 = np.append(hist2, np.array([hist2[0],hist2[-1]]))
+    xs = np.append(xs, np.array([0.,1.]))
+    h2 = interpolate.interp1d(xs , hist2, kind='quadratic')
+    xs = np.linspace(0,1,len(hist1), endpoint = False) + 1/(2*len(hist1))
+    hist2 = np.array([h2(i) for i in xs])
+    
     # Shift hists to agree
     hist2 = ndimage.interpolation.shift(hist2, shift, cval = 0.0)
+    
     # Add new hist
-    if axis == 1:
-        M1 = M1.T
     for i,_ in enumerate(hist1):
         if hist1[i] != 0:
-            for j in range(M1.shape[0]):
-#                 M1[j,i] += hist2[i] * M1[j,i] / hist1[i]  # Old Method. I think it's wrong
-                M1[j,i] = hist2[i] * M1[j,i] / hist1[i]
-    if axis == 1:
+            M1[i,:] *= hist2[i] / hist1[i]
+
+    if axis == 0:
         M1 = M1.T
+        M2 = M2.T
+        
     # Plot the hists
     if plot:
         hist2 = hist2 / hist2.max() * hist1.max()  # Normalise just for nicer plot
@@ -1160,6 +1172,7 @@ def trafo_dist_M(M, M2, axis = 0, plot = False, shift = 0):
         axloc.plot(hist1)
         axloc.plot(hist2)
         axloc.legend(['hist1', 'hist2'])
+        
     return M1
 
 
@@ -1240,7 +1253,7 @@ def get_stats_mithra(fn, E, shift, K = 10.81):
     return stat
 
 
-def get_transverse_params(fn, L, l = 0.05, plot = False, Qs = [], startpoint = 0.0):
+def get_transverse_params(fn, L, l = 0.05, plot = False, Qs = [], startpoint = 0.0, ax = []):
     '''
     Takes that statfile fn.
     Then it takes sigx,sigy,sigpx,sigpy at point startpoint. (startpoint needs to be within the range of the stat file simulation
@@ -1251,6 +1264,7 @@ def get_transverse_params(fn, L, l = 0.05, plot = False, Qs = [], startpoint = 0
     Qs is a list of tuples or arrays, each of two elements = [pos Q, strength Q]
     It returns the final transverse beam parameters
     If plot is true it also makes a plot of the transverse parameters
+    Give an ax if you want to use your own axes
     '''
     [stats,_,_] = get_stats(fn, show = False)
     
@@ -1307,8 +1321,9 @@ def get_transverse_params(fn, L, l = 0.05, plot = False, Qs = [], startpoint = 0
     # Plot
     if plot:
         lw = 5
-        fig, ax = plt.subplots(1,3,figsize = (12,5))
-        ax = ax.reshape(-1)
+        if len(ax) == 0:
+            fig, ax = plt.subplots(1,3,figsize = (12,5))
+            ax = ax.reshape(-1)
         ax[0].plot(steps, x[:,0], lw = lw-2, color = 'red')
         ax[0].plot(steps, y[:,0], lw = lw-2, color = 'blue')
         ax[0].plot(stats['s'][idx:], stats['rms_x'][idx:], lw = lw, ls = '--', color = 'green')
@@ -1324,7 +1339,6 @@ def get_transverse_params(fn, L, l = 0.05, plot = False, Qs = [], startpoint = 0
         ax[2].plot(steps, y[:,2], lw = lw-2, color = 'blue')
         ax[2].plot(stats['s'][idx:], stats['xpx'][idx:], lw = lw, ls = ':', color = 'green')
         ax[2].plot(stats['s'][idx:], stats['ypy'][idx:], lw = lw, ls = ':', color = 'black')
-        plt.show()
         
     return np.concatenate((x[-1,:],y[-1,:]))
 
@@ -1389,23 +1403,29 @@ def generate_transverse_phase_space(LPSFile, trans, outFile, E = 45.4, plot = Fa
     df = df[['x', 'px', 'y', 'py', 'z', 'pz']]
     df.to_csv(outFile, sep = '\t', header = False, index = False, mode = 'a')
 
-def remove_bump(oldM, plot = False):
+
+def remove_bump(oldM, axis = 1, plot = False):
     '''
     Removes bump only from histogram on axis 1
     It returns the fixed M and the ratio of integration of the curve that has changed, so that the charge can be divided by this too
     '''
-    
+
+    if axis == 0:
+        oldM = oldM.T
+        
     # Get the hist
     extent = np.array([-0.5, oldM.shape[1] - 0.5, -0.5, oldM.shape[0] - 0.5])
-    [_,oldHist] = histAx2(ax[0], M = oldM, axis = 1, xlims = extent, plot = False)
+    [_,oldHist] = histAx2(None, M = oldM, axis = 1, xlims = extent, plot = False)
     N = len(oldHist)
+    print(N, 'and', oldM.shape)
     newHist = np.copy(oldHist)
     
     # Choose peak closest to centre
-    [peaks, props] = signal.find_peaks(oldHist, prominence = 1)
+    [peaks, _] = signal.find_peaks(oldHist, prominence = 1)
     idx = 1
     peak = peaks[idx]
-    [valleys, props] = signal.find_peaks(-oldHist, prominence = 1)
+    print("Removing peak at index", peak)
+    [valleys, _] = signal.find_peaks(-oldHist, prominence = 1)
     w2 = valleys[-1] - peak
     keep_idx = [idx for idx in range(N) if idx < peak-w2-5 or idx > peak+w2+5]
     
@@ -1427,5 +1447,271 @@ def remove_bump(oldM, plot = False):
     # Now adjust matrix to have newHist
     newM = trafo_dist_M(oldM, newM, axis = 1, plot = plot)
 
+    if axis == 0:
+        newM = newM.T
+
     return [newM, ratio]
 
+
+def average_matrix(Ms, Qs):
+    '''
+    First of all the centres of mass of the Ms are aligned
+    Then they are averaged, with weights. If Q is close to -300 pCthe weight is larger
+    Important: All images must have the same extent and size!!!
+    '''
+    Qs = np.array(Qs)
+    Ms = np.array(Ms)
+    newM = Ms[0,:,:]
+    cm = ndimage.measurements.center_of_mass(newM)
+    cm = np.asarray(cm).astype(int)
+
+    # Align all images around the same centre
+    for i in range(Ms.shape[0]):
+        cmloc = ndimage.measurements.center_of_mass(Ms[i,:,:])
+        cmloc = np.asarray(cmloc).astype(int)
+        Ms[i,:,:] = ndimage.interpolation.shift(Ms[i,:,:], cm-cmloc, cval = 0.0)
+    
+    # Now do a weighted average
+    newM = np.average(Ms, axis = 0, weights = np.abs(Qs+300)**(-1))
+    newQ = np.average(Qs, weights = np.abs(Qs+300)**(-1))
+            
+    return newM, newQ
+
+
+def save_matrix(M, extent, fn):
+    with open(fn, mode = 'w') as f:
+        np.savetxt(f,extent)
+        np.savetxt(f,M)
+
+
+def load_matrix(fn):
+    with open(fn, mode = 'r') as f:
+        extent = np.zeros(4)
+        for i in range(4):
+            extent[i] = float(f.readline())
+            
+    M = np.loadtxt(fn, skiprows = 4)
+    return M, extent
+
+
+def sample_3Ms(axs, LPS_fn, specton_fn, TDCon_fn, out_fn, Npart, casename = '',
+               E = 45.4, TDC = 2.872, spec = 365, show_info = False,
+               plot_trafos = False, sample = False):
+
+    maxHH = 0.3
+    axs = axs.reshape(-1)
+
+    print("Getting LPS")
+    MLPS, extent = load_matrix(LPS_fn)
+    MLPS = MLPS.T
+    extent = np.take_along_axis(extent, np.array([2,3,0,1]), axis = 0)
+    extent[2:] *= E/spec
+    extent[2:] -= np.mean(extent[2:])
+    extent[2:] += E
+    extent[:2] *= 1/TDC
+    extentLPS = extent.copy()
+    MLPS = centre_matrix(MLPS)
+
+    axs[0].imshow(MLPS, extent = extent, aspect = 'auto')
+    axs[0].tick_params(axis = 'both', labelsize = fs)
+    [x,hist] = histAx2(axs[0], M = MLPS, axis = 0, xlims = extent,
+                           maxHH = maxHH, color = 'orange', lw = 3)
+    rmsz = getRms(x, hist)
+    [x,hist] = histAx2(axs[0], M = MLPS, axis = 1, xlims = extent,
+                           maxHH = maxHH, color = 'orange', lw = 3)
+    [fwhmE,_] = getFWHM(x, hist)
+    axs[0].set_ylabel('E [MeV]', fontsize = fs)
+    axs[0].set_xlabel(r'z [mm]', fontsize = fs)
+    axs[0].tick_params(axis = 'both', labelsize = fs)
+    if show_info:
+        axs[0].text(.01, .5, casename + '\n' +
+                   'FWHM$_E$ = {:.2f} MeV\n'.format(fwhmE) +
+                   '$\sigma_z$ = {:.2f} $\mu$m'.format(rmsz*1e3),
+                   fontsize = fs, color = 'orange', transform = axs[0].transAxes)
+
+    print("Getting Spect only")
+    Mspec, extent = load_matrix(specton_fn)
+    Mspec = Mspec.T
+    extent = np.take_along_axis(extent, np.array([2,3,0,1]), axis = 0)
+    extent[2:] *= E/spec
+    extent[2:] -= np.mean(extent[2:])
+    extent[2:] += E
+    Mspec = centre_matrix(Mspec)
+    Mspec = zoom_M(Mspec, (extent[3]-extent[2])/(extentLPS[3]-extentLPS[2]), axis = 1)
+    extent[2:] = extentLPS[2:]
+    
+    axs[1].imshow(Mspec, extent = extent, aspect = 'auto')
+    axs[1].tick_params(axis = 'both', labelsize = fs)
+    [x,hist] = histAx2(axs[1], M = Mspec, axis = 1, xlims = extent,
+                           maxHH = maxHH, color = 'orange', lw = 3)
+    [fwhmE,_] = getFWHM(x, hist)
+    axs[1].set_ylabel('E [MeV]', fontsize = fs)
+    axs[1].set_xlabel(r'y [mm]', fontsize = fs)
+    axs[1].tick_params(axis = 'both', labelsize = fs)
+    if show_info:
+        axs[1].text(.01, .5, casename + '\n' +
+                   'FWHM$_E$ = {:.2f} MeV\n'.format(fwhmE),
+                   fontsize = fs, color = 'orange', transform = axs[1].transAxes)
+        
+    print("Getting TDC only")
+    MTDC, extent = load_matrix(TDCon_fn)
+    MTDC = MTDC.T
+    extent = np.take_along_axis(extent, np.array([2,3,0,1]), axis = 0)
+    extent[:2] *= 1/TDC
+    MTDC = centre_matrix(MTDC)
+    MTDC = zoom_M(MTDC, (extent[1]-extent[0])/(extentLPS[1]-extentLPS[0]), axis = 0)
+    extent[:2] = extentLPS[:2]
+    
+    axs[2].imshow(MTDC, extent = extent, aspect = 'auto')
+    axs[2].tick_params(axis = 'both', labelsize = fs)
+    [x,hist] = histAx2(axs[2], M = MTDC, axis = 0, xlims = extent,
+                           maxHH = maxHH, color = 'orange', lw = 3)
+    rmsz = getRms(x, hist)
+    axs[2].set_ylabel('x [mm]', fontsize = fs)
+    axs[2].set_xlabel(r'z [mm]', fontsize = fs)
+    axs[2].tick_params(axis = 'both', labelsize = fs)
+    if show_info:
+        axs[2].text(.01, .5, casename + '\n' +
+                   '$\sigma_z$ = {:.2f} $\mu$m'.format(rmsz*1e3),
+                   fontsize = fs, color = 'orange', transform = axs[2].transAxes)
+        
+
+    # Replace E distribution in MLPS with distribution from Mspec
+    print('Replacing the E distribution with the one from the spectrometer')
+    MLPS = trafo_dist_M(MLPS, Mspec, axis = 1, plot = plot_trafos)
+    MLPS = trafo_dist_M(MLPS, MTDC, axis = 0, plot = plot_trafos)
+    MLPS = trafo_dist_M(MLPS, Mspec, axis = 1, plot = plot_trafos)
+    MLPS = trafo_dist_M(MLPS, MTDC, axis = 0, plot = plot_trafos)
+
+    if not sample:
+        axs[3].imshow(MLPS, extent = extentLPS, aspect = 'auto')
+        axs[3].tick_params(axis = 'both', labelsize = fs)
+        [x,hist] = histAx2(axs[3], M = MLPS, axis = 0, xlims = extentLPS,
+                           maxHH = maxHH, color = 'orange', lw = 3)
+        rmsz = getRms(x, hist)
+        [x,hist] = histAx2(axs[3], M = MLPS, axis = 1, xlims = extentLPS,
+                           maxHH = maxHH, color = 'orange', lw = 3)
+        [fwhmE,_] = getFWHM(x, hist)
+        axs[3].set_ylabel('E [MeV]', fontsize = fs)
+        axs[3].set_xlabel(r'z [mm]', fontsize = fs)
+        axs[3].tick_params(axis = 'both', labelsize = fs)
+        if show_info:
+            axs[3].text(.01, .5, casename + '\n' +
+                        'FWHM$_E$ = {:.2f} MeV\n'.format(fwhmE) +
+                        '$\sigma_z$ = {:.2f} $\mu$m'.format(rmsz*1e3),
+                        fontsize = fs, color = 'orange', transform = axs[3].transAxes)
+    elif sample:
+
+        # Now get a density function by interpolating the gridpoints
+        print('\n Interpolating...')
+        dist = np.zeros([Npart, 2])
+        x = np.linspace(0, 1, MLPS.shape[1])
+        y = np.linspace(0, 1, MLPS.shape[0])
+        maximum = np.max(MLPS)
+        density = interpolate.interp2d(x, y, MLPS)
+
+        # Now generate Npart particles using the density function
+        print('generating particles...')
+        realNpart = 0
+        for j in range(Npart):
+            if j%50000 == 0:
+                print(j, 'particles have been generated')
+            N_attempts = 0
+            while True:
+                x = np.random.rand()
+                y = np.random.rand()
+                N_attempts += 1
+                if np.random.rand() * maximum < density(x,y):
+                    dist[realNpart,0] = x
+                    dist[realNpart,1] = 1 - y
+                    realNpart += 1
+                    break
+                elif N_attempts > 200:
+                    break
+        dist = dist[:realNpart]
+        print("Finally we have", realNpart, 'particles')
+                    
+        # Rescale obtained distribution
+        dist[:,0] *= extentLPS[1] - extentLPS[0]
+        dist[:,0] -= np.mean(dist[:,0])
+        dist[:,0] *= 1e-3  # mm to metres
+        dist[:,1] *= extentLPS[3] - extentLPS[2]
+        dist[:,1] += extentLPS[2]
+
+        # Save distribution for later use
+        dist[:,1] *= 1 / .511  # MeV to unitless momentum (necessary for OPAL)
+        df = pd.DataFrame(dist, columns = ['z', 'pz'])
+        df.to_csv(out_fn, sep = '\t', index = False, mode = 'w')
+        dist[:,1] *= 511e3  # back to eV for the plot
+
+        # Plot newly generated distro
+        [hist, bins] = np.histogram(dist[:,0], bins = 50)
+        [FWHM,_] = getFWHM(bins[1:], hist, denom = 2)
+        FWHM *= 1e6
+        rms = getRms(bins[1:], hist) * 1e6
+        [hist, bins] = np.histogram(dist[:,1], bins = 50)
+        [FWHME,_] = getFWHM(bins[1:], hist, denom = 2)
+        FWHME *= 1e-6
+        rmsE = getRms(bins[1:], hist) * 1e-6
+        plotScreenXY(axs[3], dist[:,0], dist[:,1], ['z', 'E'], type = 'hist2d-hist', factors = [1e3, 1e-6], nbins = 200, color = 3, maxHH = maxHH, enable_cbar = 0)
+        # Text with info
+        axs[3].text(.01, .45, 'Generated {:.2e} particle distribution\n'.format(realNpart) +
+                   'E = {:.1f} MeV, Q = 300 pC\n'.format(E) + 
+                   'FWHM$_z$ = {:.2f} $\mu$m,\n$\sigma_z$ = {:.2f} $\mu$m\n'.format(FWHM, rms) +
+                   'FWHM$_E$ = {:.2f} MeV,\n$\sigma_E$ = {:.2f} MeV\n'.format(FWHME, rmsE),
+                   fontsize = 15, color = 'black', transform = axs[3].transAxes)
+        axs[3].set_xlim(extentLPS[:2] - np.mean(extentLPS[:2]))
+        axs[3].set_ylim(extentLPS[2:])
+
+# # Adjust axes to have same scale
+# pmf.adjust_axes_limits([ax[0], ax[2], ax[3]], 'x')
+# pmf.adjust_axes_limits([ax[0], ax[1], ax[3]], 'y')
+
+
+# # Add axis labels when necessary
+# ax[0].set_ylabel('E [MeV]', fontsize = fs)
+# ax[2].set_xlabel(r'z [$\mu$m]', fontsize = fs)
+# ax[1].tick_params(axis = 'y', labelsize = fs)
+# ax[1].set_xticks([])
+# ax[2].tick_params(axis = 'x', labelsize = fs)
+# ax[2].set_yticks([])
+
+# # Custom legend
+# custom_lines = [Line2D([0], [0], color = 'orange', lw = 4, ls = lsspe),
+#                 Line2D([0], [0], color = 'orange', lw = 4, ls = lstdc),
+#                 Line2D([0], [0], color = 'red', lw = 4),]
+# fig.legend(custom_lines, ['Spectrometer only', 'TDC only', '1D projection current plot', 'Histogram before removing bump'], fontsize = fs)
+
+# # Save the image
+# plt.savefig((pltpath + '/YAG_to_OPAL_distro_case3_noBump.png'),bbox_inches='tight')
+# plt.show()
+
+
+def centre_matrix(M):
+    cent = np.array([M.shape[0]//2, M.shape[1]//2])
+    cm = ndimage.measurements.center_of_mass(M)
+    cm = np.asarray(cm).astype(int)
+    return ndimage.interpolation.shift(M, cent-cm, cval = 0.0)
+
+
+def zoom_M(M, z, axis):
+    # Zoom and maintain the same number of pixels
+    if axis == 0:
+        M = M.T
+    old = M.shape    
+    L0 = old[0]
+    M = ndimage.zoom(M, [z,1.0])
+    Lf = M.shape[0]
+    diff1 = (Lf-L0)//2
+    diff2 = Lf - L0 - diff1
+    if diff1 > 0:
+        M = M[diff1:-diff2,:]
+    elif diff1 < 0:
+        extra1 = np.zeros((-diff1,M.shape[1]))
+        extra2 = np.zeros((-diff2,M.shape[1]))
+        M = np.concatenate((extra1,M,extra2), axis = 0)
+
+    if axis == 0:
+        M = M.T
+             
+    return M
